@@ -13,7 +13,7 @@ env:
   SINGBOX_VERSION: "1.10.0"
   METACUBEX_REPO: "MetaCubeX/meta-rules-dat"
   CATEGORIES: >-
-    geosite-ru
+    geosite-category-ru
     geosite-google
     geosite-youtube
     geosite-telegram
@@ -75,9 +75,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="latest"
-          # Удаляем старый релиз и тег перед пересозданием
           gh release delete "$TAG" --repo "${{ github.repository }}" --cleanup-tag --yes 2>/dev/null || true
-          # Небольшая пауза: GitHub API иногда не успевает удалить тег мгновенно
           sleep 3
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
