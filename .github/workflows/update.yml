@@ -1,0 +1,83 @@
+name: Обновление гео-файлов
+
+on:
+  schedule:
+    # Ежедневно в 03:00 UTC
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SINGBOX_VERSION: "1.10.0"
+  METACUBEX_REPO: "MetaCubeX/meta-rules-dat"
+  CATEGORIES: >-
+    geosite-ru
+    geosite-google
+    geosite-youtube
+    geosite-telegram
+    geosite-twitter
+    geosite-instagram
+    geosite-facebook
+    geosite-private
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Скачать geosite.db из MetaCubeX/meta-rules-dat
+        run: |
+          RELEASE_URL="https://github.com/${{ env.METACUBEX_REPO }}/releases/latest/download/geosite.db"
+          curl -fsSL -o geosite.db "$RELEASE_URL"
+          echo "geosite.db: $(du -sh geosite.db | cut -f1)"
+
+      - name: Скачать sing-box (linux-amd64)
+        run: |
+          SB_URL="https://github.com/SagerNet/sing-box/releases/download/v${{ env.SINGBOX_VERSION }}/sing-box-${{ env.SINGBOX_VERSION }}-linux-amd64.tar.gz"
+          curl -fsSL -o singbox.tar.gz "$SB_URL"
+          tar -xzf singbox.tar.gz --wildcards --no-anchored 'sing-box' --strip-components=1
+          chmod +x sing-box
+          ./sing-box version
+
+      - name: Конвертировать категории в .srs
+        run: |
+          mkdir -p out
+          for CAT in ${{ env.CATEGORIES }}; do
+            # CAT вида "geosite-ru" → имя категории для export "ru"
+            NAME="${CAT#geosite-}"
+            echo "Конвертация: $CAT (category=$NAME)"
+            ./sing-box geosite export "$NAME" -f geosite.db -o "out/${CAT}.srs"
+          done
+          ls -lh out/
+
+      - name: Сформировать manifest.json
+        run: |
+          VERSION="$(date -u +%Y%m%d)-$(date -u +%H%M)"
+          UPDATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          FILES_JSON="[]"
+          for f in out/*.srs; do
+            NAME="$(basename "$f")"
+            SHA256="$(sha256sum "$f" | awk '{print $1}')"
+            SIZE="$(stat -c%s "$f")"
+            ENTRY="{\"name\":\"${NAME}\",\"sha256\":\"${SHA256}\",\"size\":${SIZE}}"
+            FILES_JSON="$(echo "$FILES_JSON" | jq --argjson e "$ENTRY" '. + [$e]')"
+          done
+          echo "{\"version\":\"${VERSION}\",\"updated_at\":\"${UPDATED}\",\"files\":${FILES_JSON}}" \
+            | jq . > out/manifest.json
+          cat out/manifest.json
+
+      - name: Опубликовать release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(date -u +%Y%m%d)"
+          # Удаляем старый release с тем же тегом (если существует)
+          gh release delete "$TAG" --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Geo-files $TAG" \
+            --notes "Автоматически собрано из MetaCubeX/meta-rules-dat" \
+            out/manifest.json \
+            out/*.srs
