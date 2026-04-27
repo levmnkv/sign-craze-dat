@@ -27,6 +27,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Скачать geosite.db из MetaCubeX/meta-rules-dat
         run: |
           RELEASE_URL="https://github.com/${{ env.METACUBEX_REPO }}/releases/latest/download/geosite.db"
@@ -45,7 +48,6 @@ jobs:
         run: |
           mkdir -p out
           for CAT in ${{ env.CATEGORIES }}; do
-            # CAT вида "geosite-ru" → имя категории для export "ru"
             NAME="${CAT#geosite-}"
             echo "Конвертация: $CAT (category=$NAME)"
             ./sing-box geosite export "$NAME" -f geosite.db -o "out/${CAT}.srs"
@@ -54,7 +56,7 @@ jobs:
 
       - name: Сформировать manifest.json
         run: |
-          VERSION="$(date -u +%Y%m%d)-$(date -u +%H%M)"
+          VERSION="$(date -u +%Y%m%d-%H%M)"
           UPDATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           FILES_JSON="[]"
           for f in out/*.srs; do
@@ -68,16 +70,19 @@ jobs:
             | jq . > out/manifest.json
           cat out/manifest.json
 
-      - name: Опубликовать release
+      - name: Опубликовать релиз (тег latest)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v$(date -u +%Y%m%d)"
-          # Удаляем старый release с тем же тегом (если существует)
-          gh release delete "$TAG" --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          TAG="latest"
+          # Удаляем старый релиз и тег перед пересозданием
+          gh release delete "$TAG" --repo "${{ github.repository }}" --cleanup-tag --yes 2>/dev/null || true
+          # Небольшая пауза: GitHub API иногда не успевает удалить тег мгновенно
+          sleep 3
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
-            --title "Geo-files $TAG" \
+            --title "Geo-files $(date -u +%Y-%m-%d)" \
             --notes "Автоматически собрано из MetaCubeX/meta-rules-dat" \
+            --latest \
             out/manifest.json \
             out/*.srs
